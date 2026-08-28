@@ -3,6 +3,7 @@ package product
 import (
 	"context"
 	"errors"
+	productmocks "go-pet-shop/internal/handlers/product/mocks"
 	"go-pet-shop/internal/models"
 	"io"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi"
+	"github.com/stretchr/testify/mock"
 )
 
 func testLogger() *slog.Logger {
@@ -49,16 +51,13 @@ func assertStatus(t *testing.T, recorder *httptest.ResponseRecorder, want int) {
 // =======================
 
 func TestGetAllProducts_Success(t *testing.T) {
-	mock := &ProductsMock{
-		GetAllProductsFunc: func(ctx context.Context) ([]models.Product, error) {
-			return []models.Product{
-				{ID: 1, Name: "Dog Food", Price: 10.5, Stock: 3},
-			}, nil
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("GetAllProducts", mock.Anything).Return([]models.Product{
+		{ID: 1, Name: "Dog Food", Price: 10.5, Stock: 3},
+	}, nil).Once()
 
 	req, w := request(http.MethodGet, "/products", "")
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.GetAllProducts(w, req)
 
@@ -66,14 +65,11 @@ func TestGetAllProducts_Success(t *testing.T) {
 }
 
 func TestGetAllProducts_Fail(t *testing.T) {
-	mock := &ProductsMock{
-		GetAllProductsFunc: func(ctx context.Context) ([]models.Product, error) {
-			return nil, errors.New("db error")
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("GetAllProducts", mock.Anything).Return(nil, errors.New("db error")).Once()
 
 	req, w := request(http.MethodGet, "/products", "")
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.GetAllProducts(w, req)
 
@@ -85,40 +81,26 @@ func TestGetAllProducts_Fail(t *testing.T) {
 // =======================
 
 func TestCreateProduct_Success(t *testing.T) {
-	called := false
-	mock := &ProductsMock{
-		CreateProductFunc: func(ctx context.Context, product models.Product) (int, error) {
-			called = true
-
-			if product.Name != "Dog Food" || product.Price != 10.5 || product.Stock != 3 {
-				t.Fatalf("unexpected product: %+v", product)
-			}
-
-			return 1, nil
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("CreateProduct", mock.Anything, models.Product{
+		Name:  "Dog Food",
+		Price: 10.5,
+		Stock: 3,
+	}).Return(1, nil).Once()
 
 	req, w := request(http.MethodPost, "/products", `{"Name":"Dog Food","Price":10.5,"Stock":3}`)
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.CreateProduct(w, req)
 
 	assertStatus(t, w, http.StatusOK)
-	if !called {
-		t.Fatal("expected CreateProduct to be called")
-	}
 }
 
 func TestCreateProduct_BadRequest(t *testing.T) {
-	mock := &ProductsMock{
-		CreateProductFunc: func(ctx context.Context, product models.Product) (int, error) {
-			t.Fatal("CreateProduct must not be called for invalid JSON")
-			return 0, nil
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
 
 	req, w := request(http.MethodPost, "/products", `{"Name":`)
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.CreateProduct(w, req)
 
@@ -126,14 +108,15 @@ func TestCreateProduct_BadRequest(t *testing.T) {
 }
 
 func TestCreateProduct_Fail(t *testing.T) {
-	mock := &ProductsMock{
-		CreateProductFunc: func(ctx context.Context, product models.Product) (int, error) {
-			return 0, errors.New("db error")
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("CreateProduct", mock.Anything, models.Product{
+		Name:  "Dog Food",
+		Price: 10.5,
+		Stock: 3,
+	}).Return(0, errors.New("db error")).Once()
 
 	req, w := request(http.MethodPost, "/products", `{"Name":"Dog Food","Price":10.5,"Stock":3}`)
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.CreateProduct(w, req)
 
@@ -145,40 +128,27 @@ func TestCreateProduct_Fail(t *testing.T) {
 // =======================
 
 func TestUpdateProduct_Success(t *testing.T) {
-	called := false
-	mock := &ProductsMock{
-		UpdateProductFunc: func(ctx context.Context, product models.Product) error {
-			called = true
-
-			if product.ID != 1 || product.Name != "Cat Toy" || product.Price != 7.25 || product.Stock != 8 {
-				t.Fatalf("unexpected product: %+v", product)
-			}
-
-			return nil
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("UpdateProduct", mock.Anything, models.Product{
+		ID:    1,
+		Name:  "Cat Toy",
+		Price: 7.25,
+		Stock: 8,
+	}).Return(nil).Once()
 
 	req, w := requestWithID(http.MethodPut, "/products/1", "1", `{"Name":"Cat Toy","Price":7.25,"Stock":8}`)
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.UpdateProduct(w, req)
 
 	assertStatus(t, w, http.StatusOK)
-	if !called {
-		t.Fatal("expected UpdateProduct to be called")
-	}
 }
 
 func TestUpdateProduct_BadRequest(t *testing.T) {
-	mock := &ProductsMock{
-		UpdateProductFunc: func(ctx context.Context, product models.Product) error {
-			t.Fatal("UpdateProduct must not be called for invalid JSON")
-			return nil
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
 
 	req, w := requestWithID(http.MethodPut, "/products/1", "1", `{"Name":`)
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.UpdateProduct(w, req)
 
@@ -186,14 +156,16 @@ func TestUpdateProduct_BadRequest(t *testing.T) {
 }
 
 func TestUpdateProduct_Fail(t *testing.T) {
-	mock := &ProductsMock{
-		UpdateProductFunc: func(ctx context.Context, product models.Product) error {
-			return errors.New("db error")
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("UpdateProduct", mock.Anything, models.Product{
+		ID:    1,
+		Name:  "Cat Toy",
+		Price: 7.25,
+		Stock: 8,
+	}).Return(errors.New("db error")).Once()
 
 	req, w := requestWithID(http.MethodPut, "/products/1", "1", `{"Name":"Cat Toy","Price":7.25,"Stock":8}`)
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.UpdateProduct(w, req)
 
@@ -205,40 +177,22 @@ func TestUpdateProduct_Fail(t *testing.T) {
 // =======================
 
 func TestDeleteProduct_Success(t *testing.T) {
-	called := false
-	mock := &ProductsMock{
-		DeleteProductFunc: func(ctx context.Context, id int) error {
-			called = true
-
-			if id != 1 {
-				t.Fatalf("expected id 1, got %d", id)
-			}
-
-			return nil
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("DeleteProduct", mock.Anything, 1).Return(nil).Once()
 
 	req, w := requestWithID(http.MethodDelete, "/products/1", "1", "")
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.DeleteProduct(w, req)
 
 	assertStatus(t, w, http.StatusOK)
-	if !called {
-		t.Fatal("expected DeleteProduct to be called")
-	}
 }
 
 func TestDeleteProduct_BadRequest(t *testing.T) {
-	mock := &ProductsMock{
-		DeleteProductFunc: func(ctx context.Context, id int) error {
-			t.Fatal("DeleteProduct must not be called for empty id")
-			return nil
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
 
 	req, w := request(http.MethodDelete, "/products/", "")
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.DeleteProduct(w, req)
 
@@ -246,14 +200,11 @@ func TestDeleteProduct_BadRequest(t *testing.T) {
 }
 
 func TestDeleteProduct_Fail(t *testing.T) {
-	mock := &ProductsMock{
-		DeleteProductFunc: func(ctx context.Context, id int) error {
-			return errors.New("db error")
-		},
-	}
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("DeleteProduct", mock.Anything, 1).Return(errors.New("db error")).Once()
 
 	req, w := requestWithID(http.MethodDelete, "/products/1", "1", "")
-	handler := New(testLogger(), mock)
+	handler := New(testLogger(), storageMock)
 
 	handler.DeleteProduct(w, req)
 
