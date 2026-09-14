@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"go-pet-shop/internal/models"
+	"go-pet-shop/internal/storage"
 	"io"
 	"log/slog"
 	"net/http"
@@ -80,6 +81,35 @@ func TestGetAllProducts_Fail(t *testing.T) {
 	assertStatus(t, w, http.StatusInternalServerError)
 }
 
+func TestGetProductByID_Success(t *testing.T) {
+	mock := &ProductsMock{
+		GetProductByIDFunc: func(ctx context.Context, id int) (models.Product, error) {
+			if id != 1 {
+				t.Fatalf("expected id 1, got %d", id)
+			}
+			return models.Product{ID: 1, Name: "Dog Food", Price: 10.5, Stock: 3}, nil
+		},
+	}
+
+	req, w := requestWithID(http.MethodGet, "/products/1", "1", "")
+	New(testLogger(), mock).GetProductByID(w, req)
+
+	assertStatus(t, w, http.StatusOK)
+}
+
+func TestGetProductByID_NotFound(t *testing.T) {
+	mock := &ProductsMock{
+		GetProductByIDFunc: func(ctx context.Context, id int) (models.Product, error) {
+			return models.Product{}, storage.ErrNotFound
+		},
+	}
+
+	req, w := requestWithID(http.MethodGet, "/products/42", "42", "")
+	New(testLogger(), mock).GetProductByID(w, req)
+
+	assertStatus(t, w, http.StatusNotFound)
+}
+
 // =======================
 // Create Product
 // =======================
@@ -103,7 +133,7 @@ func TestCreateProduct_Success(t *testing.T) {
 
 	handler.CreateProduct(w, req)
 
-	assertStatus(t, w, http.StatusOK)
+	assertStatus(t, w, http.StatusCreated)
 	if !called {
 		t.Fatal("expected CreateProduct to be called")
 	}
@@ -223,7 +253,7 @@ func TestDeleteProduct_Success(t *testing.T) {
 
 	handler.DeleteProduct(w, req)
 
-	assertStatus(t, w, http.StatusOK)
+	assertStatus(t, w, http.StatusNoContent)
 	if !called {
 		t.Fatal("expected DeleteProduct to be called")
 	}
