@@ -31,3 +31,21 @@ type OrderItem struct {
 	ProductPrice float64 `json:"product_price,omitempty"`
 	Quantity     int     `json:"quantity"`
 }
+
+type OrderDetail struct {
+	OrderID           int         `json:"order_id"`
+	UserEmail         string      `json:"user_email"`
+	TotalPrice        float64     `json:"total_price"`
+	CreatedAt         time.Time   `json:"created_at"`
+	TransactionAmount float64     `json:"transaction_amount"`
+	TransactionStatus string      `json:"transaction_status"`
+	Items             []OrderItem `json:"items"`
+}
+
+type PopularProduct struct {
+	ProductID     int     `json:"product_id"`
+	Name          string  `json:"name"`
+	Price         float64 `json:"price"`
+	Stock         int     `json:"stock"`
+	TotalQuantity int64   `json:"total_quantity"`
+}

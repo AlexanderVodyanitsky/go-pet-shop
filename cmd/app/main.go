@@ -4,6 +4,7 @@ import (
 	"context"
 	"go-pet-shop/internal/config"
 	"go-pet-shop/internal/handlers"
+	"go-pet-shop/internal/handlers/analytics"
 	"go-pet-shop/internal/handlers/checkout"
 	"go-pet-shop/internal/handlers/order"
 	"go-pet-shop/internal/handlers/product"
@@ -58,10 +59,12 @@ func main() {
 	userHandler := user.New(log, storage)
 	orderHandler := order.New(log, storage)
 	checkoutHandler := checkout.New(log, storage)
+	analyticsHandler := analytics.New(log, storage)
 
 	router.Get("/status", handlers.StatusHandler)
 	router.Get("/products", productHandler.GetAllProducts)
 	router.Post("/products", productHandler.CreateProduct)
+	router.Get("/products/popular", analyticsHandler.GetPopularProducts)
 	router.Get("/products/{id}", productHandler.GetProductByID)
 	router.Put("/products/{id}", productHandler.UpdateProduct)
 	router.Delete("/products/{id}", productHandler.DeleteProduct)
@@ -71,7 +74,9 @@ func main() {
 	router.Post("/checkout", checkoutHandler.PlaceOrder)
 	router.Get("/users", userHandler.GetAllUsers)
 	router.Post("/users", userHandler.CreateUser)
+	router.Get("/users/history", analyticsHandler.GetUserOrderHistory)
 	router.Get("/users/orders", orderHandler.GetOrdersByUserEmail)
+	router.Get("/users/{email}/history", analyticsHandler.GetUserOrderHistory)
 	router.Get("/users/{email}/orders", orderHandler.GetOrdersByUserEmail)
 	router.Get("/users/{email}", userHandler.GetUserByEmail)
 
