@@ -5,6 +5,7 @@ import (
 	"errors"
 	productmocks "go-pet-shop/internal/handlers/product/mocks"
 	"go-pet-shop/internal/models"
+	"go-pet-shop/internal/storage"
 	"io"
 	"log/slog"
 	"net/http"
@@ -76,6 +77,29 @@ func TestGetAllProducts_Fail(t *testing.T) {
 	assertStatus(t, w, http.StatusInternalServerError)
 }
 
+func TestGetProductByID_Success(t *testing.T) {
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("GetProductByID", mock.Anything, 1).Return(models.Product{
+		ID: 1, Name: "Dog Food", Price: 10.5, Stock: 3,
+	}, nil).Once()
+
+	req, w := requestWithID(http.MethodGet, "/products/1", "1", "")
+	New(testLogger(), storageMock).GetProductByID(w, req)
+
+	assertStatus(t, w, http.StatusOK)
+}
+
+func TestGetProductByID_NotFound(t *testing.T) {
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("GetProductByID", mock.Anything, 42).
+		Return(models.Product{}, storage.ErrNotFound).Once()
+
+	req, w := requestWithID(http.MethodGet, "/products/42", "42", "")
+	New(testLogger(), storageMock).GetProductByID(w, req)
+
+	assertStatus(t, w, http.StatusNotFound)
+}
+
 // =======================
 // Create Product
 // =======================
@@ -93,7 +117,7 @@ func TestCreateProduct_Success(t *testing.T) {
 
 	handler.CreateProduct(w, req)
 
-	assertStatus(t, w, http.StatusOK)
+	assertStatus(t, w, http.StatusCreated)
 }
 
 func TestCreateProduct_BadRequest(t *testing.T) {
@@ -185,7 +209,7 @@ func TestDeleteProduct_Success(t *testing.T) {
 
 	handler.DeleteProduct(w, req)
 
-	assertStatus(t, w, http.StatusOK)
+	assertStatus(t, w, http.StatusNoContent)
 }
 
 func TestDeleteProduct_BadRequest(t *testing.T) {

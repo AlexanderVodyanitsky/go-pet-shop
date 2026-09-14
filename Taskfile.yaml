@@ -18,3 +18,14 @@ tasks:
     desc: "Run linters on the codebase"
     cmds:
       - golangci-lint run ./...
+
+  test:
+    desc: "Run all tests"
+    cmds:
+      - go test ./...
+
+  run:
+    desc: "Run the API locally"
+    dotenv: [".env"]
+    cmds:
+      - go run cmd/app/main.go
