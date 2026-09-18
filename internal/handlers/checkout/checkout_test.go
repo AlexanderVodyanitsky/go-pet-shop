@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"go-pet-shop/internal/models"
-	"go-pet-shop/internal/storage"
+	"go-pet-shop/internal/service"
 	"io"
 	"log/slog"
 	"net/http"
@@ -28,7 +28,7 @@ func (m *checkoutMock) PlaceOrder(
 func TestPlaceOrder(t *testing.T) {
 	mock := &checkoutMock{
 		placeOrderFunc: func(_ context.Context, email string, items []models.OrderItem) (int, error) {
-			if email != "alex@example.com" {
+			if email != "Alex@Example.com" {
 				t.Fatalf("unexpected email: %s", email)
 			}
 			if len(items) != 1 || items[0].ProductID != 3 || items[0].Quantity != 2 {
@@ -52,11 +52,9 @@ func TestPlaceOrder(t *testing.T) {
 }
 
 func TestPlaceOrderRejectsEmptyItems(t *testing.T) {
-	called := false
 	mock := &checkoutMock{
 		placeOrderFunc: func(context.Context, string, []models.OrderItem) (int, error) {
-			called = true
-			return 0, nil
+			return 0, service.InvalidInput("at least one order item is required")
 		},
 	}
 	req := checkoutRequest(`{"user_email":"alex@example.com","items":[]}`)
@@ -65,13 +63,10 @@ func TestPlaceOrderRejectsEmptyItems(t *testing.T) {
 	New(checkoutTestLogger(), mock).PlaceOrder(w, req)
 
 	assertCheckoutStatus(t, w, http.StatusBadRequest)
-	if called {
-		t.Fatal("storage must not be called")
-	}
 }
 
 func TestPlaceOrderNotFound(t *testing.T) {
-	mock := checkoutErrorMock(storage.ErrNotFound)
+	mock := checkoutErrorMock(service.ErrNotFound)
 	w := httptest.NewRecorder()
 
 	New(checkoutTestLogger(), mock).PlaceOrder(w, validCheckoutRequest())
@@ -80,7 +75,7 @@ func TestPlaceOrderNotFound(t *testing.T) {
 }
 
 func TestPlaceOrderInsufficientStock(t *testing.T) {
-	mock := checkoutErrorMock(storage.ErrInsufficientStock)
+	mock := checkoutErrorMock(service.ErrInsufficientStock)
 	w := httptest.NewRecorder()
 
 	New(checkoutTestLogger(), mock).PlaceOrder(w, validCheckoutRequest())

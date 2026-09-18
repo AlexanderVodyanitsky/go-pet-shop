@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"go-pet-shop/internal/models"
-	"go-pet-shop/internal/storage"
+	"go-pet-shop/internal/service"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,25 +17,28 @@ import (
 )
 
 type ordersMock struct {
-	createOrderFunc            func(context.Context, models.Order) (int, error)
-	addOrderItemFunc           func(context.Context, models.OrderItem) error
-	getOrderByIDFunc           func(context.Context, int) (models.Order, error)
-	getOrdersByUserEmailFunc   func(context.Context, string) ([]models.Order, error)
-	getOrderItemsByOrderIDFunc func(context.Context, int) ([]models.OrderItem, error)
+	createOrderFunc          func(context.Context, models.Order) (models.Order, error)
+	addOrderItemFunc         func(context.Context, int, models.OrderItem) (models.OrderItem, error)
+	getOrderByIDFunc         func(context.Context, int) (models.Order, error)
+	getOrdersByUserEmailFunc func(context.Context, string) ([]models.Order, error)
 }
 
-func (m *ordersMock) CreateOrder(ctx context.Context, order models.Order) (int, error) {
+func (m *ordersMock) CreateOrder(ctx context.Context, order models.Order) (models.Order, error) {
 	if m.createOrderFunc == nil {
-		return 0, nil
+		return models.Order{}, nil
 	}
 	return m.createOrderFunc(ctx, order)
 }
 
-func (m *ordersMock) AddOrderItem(ctx context.Context, item models.OrderItem) error {
+func (m *ordersMock) AddOrderItem(
+	ctx context.Context,
+	orderID int,
+	item models.OrderItem,
+) (models.OrderItem, error) {
 	if m.addOrderItemFunc == nil {
-		return nil
+		return models.OrderItem{}, nil
 	}
-	return m.addOrderItemFunc(ctx, item)
+	return m.addOrderItemFunc(ctx, orderID, item)
 }
 
 func (m *ordersMock) GetOrderByID(ctx context.Context, id int) (models.Order, error) {
@@ -52,20 +55,13 @@ func (m *ordersMock) GetOrdersByUserEmail(ctx context.Context, email string) ([]
 	return m.getOrdersByUserEmailFunc(ctx, email)
 }
 
-func (m *ordersMock) GetOrderItemsByOrderID(ctx context.Context, id int) ([]models.OrderItem, error) {
-	if m.getOrderItemsByOrderIDFunc == nil {
-		return nil, nil
-	}
-	return m.getOrderItemsByOrderIDFunc(ctx, id)
-}
-
 func TestCreateOrder(t *testing.T) {
 	mock := &ordersMock{
-		createOrderFunc: func(_ context.Context, order models.Order) (int, error) {
-			if order.UserEmail != "alex@example.com" || order.TotalPrice != 25.5 {
+		createOrderFunc: func(_ context.Context, order models.Order) (models.Order, error) {
+			if order.UserEmail != "Alex@Example.com" || order.TotalPrice != 25.5 {
 				t.Fatalf("unexpected order: %+v", order)
 			}
-			return 9, nil
+			return models.Order{ID: 9, UserEmail: "alex@example.com", TotalPrice: 25.5}, nil
 		},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/orders", strings.NewReader(
@@ -80,8 +76,8 @@ func TestCreateOrder(t *testing.T) {
 
 func TestCreateOrderUserNotFound(t *testing.T) {
 	mock := &ordersMock{
-		createOrderFunc: func(context.Context, models.Order) (int, error) {
-			return 0, storage.ErrNotFound
+		createOrderFunc: func(context.Context, models.Order) (models.Order, error) {
+			return models.Order{}, service.ErrNotFound
 		},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/orders", strings.NewReader(
@@ -96,11 +92,12 @@ func TestCreateOrderUserNotFound(t *testing.T) {
 
 func TestAddOrderItem(t *testing.T) {
 	mock := &ordersMock{
-		addOrderItemFunc: func(_ context.Context, item models.OrderItem) error {
-			if item.OrderID != 4 || item.ProductID != 2 || item.Quantity != 3 {
+		addOrderItemFunc: func(_ context.Context, orderID int, item models.OrderItem) (models.OrderItem, error) {
+			if orderID != 4 || item.ProductID != 2 || item.Quantity != 3 {
 				t.Fatalf("unexpected item: %+v", item)
 			}
-			return nil
+			item.OrderID = orderID
+			return item, nil
 		},
 	}
 	req := orderRequestWithID(http.MethodPost, "/orders/4/items", "4",
@@ -113,11 +110,9 @@ func TestAddOrderItem(t *testing.T) {
 }
 
 func TestAddOrderItemRejectsZeroQuantity(t *testing.T) {
-	called := false
 	mock := &ordersMock{
-		addOrderItemFunc: func(context.Context, models.OrderItem) error {
-			called = true
-			return nil
+		addOrderItemFunc: func(context.Context, int, models.OrderItem) (models.OrderItem, error) {
+			return models.OrderItem{}, service.InvalidInput("quantity must be a positive integer")
 		},
 	}
 	req := orderRequestWithID(http.MethodPost, "/orders/4/items", "4",
@@ -127,19 +122,16 @@ func TestAddOrderItemRejectsZeroQuantity(t *testing.T) {
 	New(orderTestLogger(), mock).AddOrderItem(w, req)
 
 	assertOrderStatus(t, w, http.StatusBadRequest)
-	if called {
-		t.Fatal("storage must not be called")
-	}
 }
 
 func TestGetOrderByIDWithItems(t *testing.T) {
 	createdAt := time.Date(2026, time.September, 14, 10, 0, 0, 0, time.UTC)
 	mock := &ordersMock{
 		getOrderByIDFunc: func(_ context.Context, id int) (models.Order, error) {
-			return models.Order{ID: id, UserEmail: "alex@example.com", TotalPrice: 12, CreatedAt: createdAt}, nil
-		},
-		getOrderItemsByOrderIDFunc: func(_ context.Context, id int) ([]models.OrderItem, error) {
-			return []models.OrderItem{{ID: 1, OrderID: id, ProductID: 2, Quantity: 1}}, nil
+			return models.Order{
+				ID: id, UserEmail: "alex@example.com", TotalPrice: 12, CreatedAt: createdAt,
+				Items: []models.OrderItem{{ID: 1, OrderID: id, ProductID: 2, Quantity: 1}},
+			}, nil
 		},
 	}
 	req := orderRequestWithID(http.MethodGet, "/orders/5", "5", "")
@@ -156,7 +148,7 @@ func TestGetOrderByIDWithItems(t *testing.T) {
 func TestGetOrderByIDNotFound(t *testing.T) {
 	mock := &ordersMock{
 		getOrderByIDFunc: func(context.Context, int) (models.Order, error) {
-			return models.Order{}, storage.ErrNotFound
+			return models.Order{}, service.ErrNotFound
 		},
 	}
 	req := orderRequestWithID(http.MethodGet, "/orders/404", "404", "")
@@ -170,7 +162,7 @@ func TestGetOrderByIDNotFound(t *testing.T) {
 func TestGetOrdersByUserEmail(t *testing.T) {
 	mock := &ordersMock{
 		getOrdersByUserEmailFunc: func(_ context.Context, email string) ([]models.Order, error) {
-			if email != "alex@example.com" {
+			if email != "Alex@Example.com" {
 				t.Fatalf("unexpected email: %s", email)
 			}
 			return []models.Order{}, nil

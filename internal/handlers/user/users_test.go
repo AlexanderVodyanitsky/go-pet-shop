@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"go-pet-shop/internal/models"
-	"go-pet-shop/internal/storage"
+	"go-pet-shop/internal/service"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,12 +16,12 @@ import (
 )
 
 type usersMock struct {
-	createUserFunc     func(context.Context, models.User) (int, error)
+	createUserFunc     func(context.Context, models.User) (models.User, error)
 	getUserByEmailFunc func(context.Context, string) (models.User, error)
 	getAllUsersFunc    func(context.Context) ([]models.User, error)
 }
 
-func (m *usersMock) CreateUser(ctx context.Context, user models.User) (int, error) {
+func (m *usersMock) CreateUser(ctx context.Context, user models.User) (models.User, error) {
 	return m.createUserFunc(ctx, user)
 }
 
@@ -35,11 +35,11 @@ func (m *usersMock) GetAllUsers(ctx context.Context) ([]models.User, error) {
 
 func TestCreateUser(t *testing.T) {
 	mock := &usersMock{
-		createUserFunc: func(_ context.Context, user models.User) (int, error) {
-			if user.Name != "Alex" || user.Email != "alex@example.com" {
+		createUserFunc: func(_ context.Context, user models.User) (models.User, error) {
+			if user.Name != " Alex " || user.Email != "Alex@Example.com" {
 				t.Fatalf("unexpected user: %+v", user)
 			}
-			return 7, nil
+			return models.User{ID: 7, Name: "Alex", Email: "alex@example.com"}, nil
 		},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(
@@ -54,9 +54,8 @@ func TestCreateUser(t *testing.T) {
 
 func TestCreateUserRejectsInvalidEmail(t *testing.T) {
 	mock := &usersMock{
-		createUserFunc: func(context.Context, models.User) (int, error) {
-			t.Fatal("storage must not be called")
-			return 0, nil
+		createUserFunc: func(context.Context, models.User) (models.User, error) {
+			return models.User{}, service.InvalidInput("valid user email is required")
 		},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(
@@ -71,8 +70,8 @@ func TestCreateUserRejectsInvalidEmail(t *testing.T) {
 
 func TestCreateUserConflict(t *testing.T) {
 	mock := &usersMock{
-		createUserFunc: func(context.Context, models.User) (int, error) {
-			return 0, storage.ErrConflict
+		createUserFunc: func(context.Context, models.User) (models.User, error) {
+			return models.User{}, service.ErrConflict
 		},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(
@@ -102,7 +101,7 @@ func TestGetAllUsers(t *testing.T) {
 func TestGetUserByEmailNotFound(t *testing.T) {
 	mock := &usersMock{
 		getUserByEmailFunc: func(context.Context, string) (models.User, error) {
-			return models.User{}, storage.ErrNotFound
+			return models.User{}, service.ErrNotFound
 		},
 	}
 	req := requestWithEmail("missing@example.com")

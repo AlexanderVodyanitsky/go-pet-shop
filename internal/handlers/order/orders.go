@@ -5,28 +5,25 @@ import (
 	"errors"
 	"go-pet-shop/internal/handlers/httpx"
 	"go-pet-shop/internal/models"
-	"go-pet-shop/internal/storage"
+	"go-pet-shop/internal/service"
 	"log/slog"
 	"net/http"
-	"net/mail"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 )
 
 type Orders interface {
-	CreateOrder(ctx context.Context, order models.Order) (int, error)
-	AddOrderItem(ctx context.Context, item models.OrderItem) error
+	CreateOrder(ctx context.Context, order models.Order) (models.Order, error)
+	AddOrderItem(ctx context.Context, orderID int, item models.OrderItem) (models.OrderItem, error)
 	GetOrderByID(ctx context.Context, id int) (models.Order, error)
 	GetOrdersByUserEmail(ctx context.Context, email string) ([]models.Order, error)
-	GetOrderItemsByOrderID(ctx context.Context, orderID int) ([]models.OrderItem, error)
 }
 
 type Handler struct {
 	log     *slog.Logger
-	storage Orders
+	service Orders
 }
 
 type createOrderRequest struct {
@@ -45,8 +42,8 @@ type createOrderResponse struct {
 	TotalPrice float64 `json:"total_price"`
 }
 
-func New(log *slog.Logger, storage Orders) *Handler {
-	return &Handler{log: log, storage: storage}
+func New(log *slog.Logger, service Orders) *Handler {
+	return &Handler{log: log, service: service}
 }
 
 func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
@@ -57,24 +54,16 @@ func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
-	request.UserEmail = strings.ToLower(strings.TrimSpace(request.UserEmail))
-	if !validEmail(request.UserEmail) {
-		httpx.Error(w, http.StatusBadRequest, "valid user email is required")
-		return
-	}
-	if request.TotalPrice < 0 {
-		httpx.Error(w, http.StatusBadRequest, "order total price cannot be negative")
-		return
-	}
-
-	order := models.Order{UserEmail: request.UserEmail, TotalPrice: request.TotalPrice}
-	id, err := h.storage.CreateOrder(r.Context(), order)
-	if errors.Is(err, storage.ErrNotFound) {
+	createdOrder, err := h.service.CreateOrder(r.Context(), models.Order{
+		UserEmail:  request.UserEmail,
+		TotalPrice: request.TotalPrice,
+	})
+	if errors.Is(err, service.ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "user not found")
 		return
 	}
-	if errors.Is(err, storage.ErrInvalidInput) {
-		httpx.Error(w, http.StatusBadRequest, "invalid order data")
+	if errors.Is(err, service.ErrInvalidInput) {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err != nil {
@@ -84,9 +73,9 @@ func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.JSON(w, http.StatusCreated, createOrderResponse{
-		ID:         id,
-		UserEmail:  order.UserEmail,
-		TotalPrice: order.TotalPrice,
+		ID:         createdOrder.ID,
+		UserEmail:  createdOrder.UserEmail,
+		TotalPrice: createdOrder.TotalPrice,
 	})
 }
 
@@ -104,27 +93,16 @@ func (h *Handler) AddOrderItem(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
-	if request.ProductID < 1 {
-		httpx.Error(w, http.StatusBadRequest, "product ID must be a positive integer")
-		return
-	}
-	if request.Quantity < 1 {
-		httpx.Error(w, http.StatusBadRequest, "quantity must be a positive integer")
-		return
-	}
-
-	item := models.OrderItem{
-		OrderID:   orderID,
+	item, err := h.service.AddOrderItem(r.Context(), orderID, models.OrderItem{
 		ProductID: request.ProductID,
 		Quantity:  request.Quantity,
-	}
-	err = h.storage.AddOrderItem(r.Context(), item)
-	if errors.Is(err, storage.ErrNotFound) {
+	})
+	if errors.Is(err, service.ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "order or product not found")
 		return
 	}
-	if errors.Is(err, storage.ErrInvalidInput) {
-		httpx.Error(w, http.StatusBadRequest, "invalid order item")
+	if errors.Is(err, service.ErrInvalidInput) {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err != nil {
@@ -145,8 +123,12 @@ func (h *Handler) GetOrderByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, err := h.storage.GetOrderByID(r.Context(), id)
-	if errors.Is(err, storage.ErrNotFound) {
+	order, err := h.service.GetOrderByID(r.Context(), id)
+	if errors.Is(err, service.ErrInvalidInput) {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "order not found")
 		return
 	}
@@ -155,14 +137,6 @@ func (h *Handler) GetOrderByID(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to retrieve order")
 		return
 	}
-
-	items, err := h.storage.GetOrderItemsByOrderID(r.Context(), id)
-	if err != nil {
-		log.Error("failed to get order items", slog.Int("order_id", id), slog.Any("error", err))
-		httpx.Error(w, http.StatusInternalServerError, "failed to retrieve order items")
-		return
-	}
-	order.Items = items
 
 	httpx.JSON(w, http.StatusOK, order)
 }
@@ -174,13 +148,11 @@ func (h *Handler) GetOrdersByUserEmail(w http.ResponseWriter, r *http.Request) {
 	if email == "" {
 		email = r.URL.Query().Get("email")
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
-	if !validEmail(email) {
-		httpx.Error(w, http.StatusBadRequest, "valid user email is required")
+	orders, err := h.service.GetOrdersByUserEmail(r.Context(), email)
+	if errors.Is(err, service.ErrInvalidInput) {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	orders, err := h.storage.GetOrdersByUserEmail(r.Context(), email)
 	if err != nil {
 		log.Error("failed to get user orders", slog.String("email", email), slog.Any("error", err))
 		httpx.Error(w, http.StatusInternalServerError, "failed to retrieve user orders")
@@ -203,9 +175,4 @@ func orderID(r *http.Request) (int, error) {
 		return 0, errors.New("order ID must be a positive integer")
 	}
 	return id, nil
-}
-
-func validEmail(value string) bool {
-	address, err := mail.ParseAddress(value)
-	return err == nil && address.Address == value
 }

@@ -10,6 +10,11 @@ import (
 	"go-pet-shop/internal/handlers/product"
 	"go-pet-shop/internal/handlers/user"
 	"go-pet-shop/internal/lib/logger"
+	analyticsservice "go-pet-shop/internal/service/analytics"
+	checkoutservice "go-pet-shop/internal/service/checkout"
+	orderservice "go-pet-shop/internal/service/order"
+	productservice "go-pet-shop/internal/service/product"
+	userservice "go-pet-shop/internal/service/user"
 	"go-pet-shop/internal/storage/postgres"
 	"log/slog"
 	"net/http"
@@ -54,12 +59,19 @@ func main() {
 	router.Use(middleware.URLFormat)
 	router.Use(logger.CustomLogger(log))
 
-	// Handlers
-	productHandler := product.New(log, storage)
-	userHandler := user.New(log, storage)
-	orderHandler := order.New(log, storage)
-	checkoutHandler := checkout.New(log, storage)
-	analyticsHandler := analytics.New(log, storage)
+	// Services: business rules and use cases.
+	productService := productservice.New(storage)
+	userService := userservice.New(storage)
+	orderService := orderservice.New(storage)
+	checkoutService := checkoutservice.New(storage)
+	analyticsService := analyticsservice.New(storage)
+
+	// Handlers: HTTP transport only.
+	productHandler := product.New(log, productService)
+	userHandler := user.New(log, userService)
+	orderHandler := order.New(log, orderService)
+	checkoutHandler := checkout.New(log, checkoutService)
+	analyticsHandler := analytics.New(log, analyticsService)
 
 	router.Get("/status", handlers.StatusHandler)
 	router.Get("/products", productHandler.GetAllProducts)

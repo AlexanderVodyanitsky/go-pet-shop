@@ -5,7 +5,7 @@ import (
 	"errors"
 	productmocks "go-pet-shop/internal/handlers/product/mocks"
 	"go-pet-shop/internal/models"
-	"go-pet-shop/internal/storage"
+	"go-pet-shop/internal/service"
 	"io"
 	"log/slog"
 	"net/http"
@@ -92,7 +92,7 @@ func TestGetProductByID_Success(t *testing.T) {
 func TestGetProductByID_NotFound(t *testing.T) {
 	storageMock := productmocks.NewProducts(t)
 	storageMock.On("GetProductByID", mock.Anything, 42).
-		Return(models.Product{}, storage.ErrNotFound).Once()
+		Return(models.Product{}, service.ErrNotFound).Once()
 
 	req, w := requestWithID(http.MethodGet, "/products/42", "42", "")
 	New(testLogger(), storageMock).GetProductByID(w, req)
@@ -110,7 +110,7 @@ func TestCreateProduct_Success(t *testing.T) {
 		Name:  "Dog Food",
 		Price: 10.5,
 		Stock: 3,
-	}).Return(1, nil).Once()
+	}).Return(models.Product{ID: 1, Name: "Dog Food", Price: 10.5, Stock: 3}, nil).Once()
 
 	req, w := request(http.MethodPost, "/products", `{"Name":"Dog Food","Price":10.5,"Stock":3}`)
 	handler := New(testLogger(), storageMock)
@@ -137,7 +137,7 @@ func TestCreateProduct_Fail(t *testing.T) {
 		Name:  "Dog Food",
 		Price: 10.5,
 		Stock: 3,
-	}).Return(0, errors.New("db error")).Once()
+	}).Return(models.Product{}, errors.New("db error")).Once()
 
 	req, w := request(http.MethodPost, "/products", `{"Name":"Dog Food","Price":10.5,"Stock":3}`)
 	handler := New(testLogger(), storageMock)
@@ -153,12 +153,11 @@ func TestCreateProduct_Fail(t *testing.T) {
 
 func TestUpdateProduct_Success(t *testing.T) {
 	storageMock := productmocks.NewProducts(t)
-	storageMock.On("UpdateProduct", mock.Anything, models.Product{
-		ID:    1,
+	storageMock.On("UpdateProduct", mock.Anything, 1, models.Product{
 		Name:  "Cat Toy",
 		Price: 7.25,
 		Stock: 8,
-	}).Return(nil).Once()
+	}).Return(models.Product{ID: 1, Name: "Cat Toy", Price: 7.25, Stock: 8}, nil).Once()
 
 	req, w := requestWithID(http.MethodPut, "/products/1", "1", `{"Name":"Cat Toy","Price":7.25,"Stock":8}`)
 	handler := New(testLogger(), storageMock)
@@ -181,12 +180,11 @@ func TestUpdateProduct_BadRequest(t *testing.T) {
 
 func TestUpdateProduct_Fail(t *testing.T) {
 	storageMock := productmocks.NewProducts(t)
-	storageMock.On("UpdateProduct", mock.Anything, models.Product{
-		ID:    1,
+	storageMock.On("UpdateProduct", mock.Anything, 1, models.Product{
 		Name:  "Cat Toy",
 		Price: 7.25,
 		Stock: 8,
-	}).Return(errors.New("db error")).Once()
+	}).Return(models.Product{}, errors.New("db error")).Once()
 
 	req, w := requestWithID(http.MethodPut, "/products/1", "1", `{"Name":"Cat Toy","Price":7.25,"Stock":8}`)
 	handler := New(testLogger(), storageMock)

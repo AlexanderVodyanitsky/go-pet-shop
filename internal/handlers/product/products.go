@@ -5,11 +5,10 @@ import (
 	"errors"
 	"go-pet-shop/internal/handlers/httpx"
 	"go-pet-shop/internal/models"
-	"go-pet-shop/internal/storage"
+	"go-pet-shop/internal/service"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -19,24 +18,24 @@ import (
 type Products interface {
 	GetAllProducts(ctx context.Context) ([]models.Product, error)
 	GetProductByID(ctx context.Context, id int) (models.Product, error)
-	CreateProduct(ctx context.Context, product models.Product) (int, error)
+	CreateProduct(ctx context.Context, product models.Product) (models.Product, error)
 	DeleteProduct(ctx context.Context, id int) error
-	UpdateProduct(ctx context.Context, product models.Product) error
+	UpdateProduct(ctx context.Context, id int, product models.Product) (models.Product, error)
 }
 
 type Handler struct {
 	log     *slog.Logger
-	storage Products
+	service Products
 }
 
-func New(log *slog.Logger, storage Products) *Handler {
-	return &Handler{log: log, storage: storage}
+func New(log *slog.Logger, service Products) *Handler {
+	return &Handler{log: log, service: service}
 }
 
 func (h *Handler) GetAllProducts(w http.ResponseWriter, r *http.Request) {
 	log := h.requestLogger(r, "handlers.product.GetAllProducts")
 
-	products, err := h.storage.GetAllProducts(r.Context())
+	products, err := h.service.GetAllProducts(r.Context())
 	if err != nil {
 		log.Error("failed to get products", slog.Any("error", err))
 		httpx.Error(w, http.StatusInternalServerError, "failed to retrieve products")
@@ -55,8 +54,8 @@ func (h *Handler) GetProductByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	product, err := h.storage.GetProductByID(r.Context(), id)
-	if errors.Is(err, storage.ErrNotFound) {
+	product, err := h.service.GetProductByID(r.Context(), id)
+	if errors.Is(err, service.ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "product not found")
 		return
 	}
@@ -77,20 +76,18 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
-	if err := validateProduct(&product); err != nil {
+	createdProduct, err := h.service.CreateProduct(r.Context(), product)
+	if errors.Is(err, service.ErrInvalidInput) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	id, err := h.storage.CreateProduct(r.Context(), product)
 	if err != nil {
 		log.Error("failed to create product", slog.Any("error", err))
 		httpx.Error(w, http.StatusInternalServerError, "failed to create product")
 		return
 	}
 
-	product.ID = id
-	httpx.JSON(w, http.StatusCreated, product)
+	httpx.JSON(w, http.StatusCreated, createdProduct)
 }
 
 func (h *Handler) UpdateProduct(w http.ResponseWriter, r *http.Request) {
@@ -107,14 +104,12 @@ func (h *Handler) UpdateProduct(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
-	product.ID = id
-	if err := validateProduct(&product); err != nil {
+	updatedProduct, err := h.service.UpdateProduct(r.Context(), id, product)
+	if errors.Is(err, service.ErrInvalidInput) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	err = h.storage.UpdateProduct(r.Context(), product)
-	if errors.Is(err, storage.ErrNotFound) {
+	if errors.Is(err, service.ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "product not found")
 		return
 	}
@@ -124,7 +119,7 @@ func (h *Handler) UpdateProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, product)
+	httpx.JSON(w, http.StatusOK, updatedProduct)
 }
 
 func (h *Handler) DeleteProduct(w http.ResponseWriter, r *http.Request) {
@@ -136,8 +131,12 @@ func (h *Handler) DeleteProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.storage.DeleteProduct(r.Context(), id)
-	if errors.Is(err, storage.ErrNotFound) {
+	err = h.service.DeleteProduct(r.Context(), id)
+	if errors.Is(err, service.ErrInvalidInput) {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "product not found")
 		return
 	}
@@ -163,18 +162,4 @@ func productID(r *http.Request) (int, error) {
 		return 0, errors.New("product ID must be a positive integer")
 	}
 	return id, nil
-}
-
-func validateProduct(product *models.Product) error {
-	product.Name = strings.TrimSpace(product.Name)
-	if product.Name == "" {
-		return errors.New("product name is required")
-	}
-	if product.Price < 0 {
-		return errors.New("product price cannot be negative")
-	}
-	if product.Stock < 0 {
-		return errors.New("product stock cannot be negative")
-	}
-	return nil
 }

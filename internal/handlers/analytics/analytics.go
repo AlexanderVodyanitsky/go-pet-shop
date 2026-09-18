@@ -2,12 +2,12 @@ package analytics
 
 import (
 	"context"
+	"errors"
 	"go-pet-shop/internal/handlers/httpx"
 	"go-pet-shop/internal/models"
+	"go-pet-shop/internal/service"
 	"log/slog"
 	"net/http"
-	"net/mail"
-	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -20,11 +20,11 @@ type Analytics interface {
 
 type Handler struct {
 	log     *slog.Logger
-	storage Analytics
+	service Analytics
 }
 
-func New(log *slog.Logger, storage Analytics) *Handler {
-	return &Handler{log: log, storage: storage}
+func New(log *slog.Logger, service Analytics) *Handler {
+	return &Handler{log: log, service: service}
 }
 
 func (h *Handler) GetUserOrderHistory(w http.ResponseWriter, r *http.Request) {
@@ -34,13 +34,11 @@ func (h *Handler) GetUserOrderHistory(w http.ResponseWriter, r *http.Request) {
 	if email == "" {
 		email = r.URL.Query().Get("email")
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
-	if !validEmail(email) {
-		httpx.Error(w, http.StatusBadRequest, "valid user email is required")
+	history, err := h.service.GetUserOrderHistory(r.Context(), email)
+	if errors.Is(err, service.ErrInvalidInput) {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	history, err := h.storage.GetUserOrderHistory(r.Context(), email)
 	if err != nil {
 		log.Error("failed to get user order history", slog.String("email", email), slog.Any("error", err))
 		httpx.Error(w, http.StatusInternalServerError, "failed to retrieve order history")
@@ -53,7 +51,7 @@ func (h *Handler) GetUserOrderHistory(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetPopularProducts(w http.ResponseWriter, r *http.Request) {
 	log := h.requestLogger(r, "handlers.analytics.GetPopularProducts")
 
-	products, err := h.storage.GetPopularProducts(r.Context())
+	products, err := h.service.GetPopularProducts(r.Context())
 	if err != nil {
 		log.Error("failed to get popular products", slog.Any("error", err))
 		httpx.Error(w, http.StatusInternalServerError, "failed to retrieve popular products")
@@ -68,9 +66,4 @@ func (h *Handler) requestLogger(r *http.Request, fn string) *slog.Logger {
 		slog.String("fn", fn),
 		slog.String("request_id", middleware.GetReqID(r.Context())),
 	)
-}
-
-func validEmail(value string) bool {
-	address, err := mail.ParseAddress(value)
-	return err == nil && address.Address == value
 }

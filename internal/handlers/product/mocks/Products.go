@@ -15,22 +15,22 @@ type Products struct {
 }
 
 // CreateProduct provides a mock function with given fields: ctx, _a1
-func (_m *Products) CreateProduct(ctx context.Context, _a1 models.Product) (int, error) {
+func (_m *Products) CreateProduct(ctx context.Context, _a1 models.Product) (models.Product, error) {
 	ret := _m.Called(ctx, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateProduct")
 	}
 
-	var r0 int
+	var r0 models.Product
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, models.Product) (int, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, models.Product) (models.Product, error)); ok {
 		return rf(ctx, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, models.Product) int); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, models.Product) models.Product); ok {
 		r0 = rf(ctx, _a1)
 	} else {
-		r0 = ret.Get(0).(int)
+		r0 = ret.Get(0).(models.Product)
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, models.Product) error); ok {
@@ -118,22 +118,32 @@ func (_m *Products) GetProductByID(ctx context.Context, id int) (models.Product,
 	return r0, r1
 }
 
-// UpdateProduct provides a mock function with given fields: ctx, _a1
-func (_m *Products) UpdateProduct(ctx context.Context, _a1 models.Product) error {
-	ret := _m.Called(ctx, _a1)
+// UpdateProduct provides a mock function with given fields: ctx, id, _a2
+func (_m *Products) UpdateProduct(ctx context.Context, id int, _a2 models.Product) (models.Product, error) {
+	ret := _m.Called(ctx, id, _a2)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateProduct")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, models.Product) error); ok {
-		r0 = rf(ctx, _a1)
+	var r0 models.Product
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int, models.Product) (models.Product, error)); ok {
+		return rf(ctx, id, _a2)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int, models.Product) models.Product); ok {
+		r0 = rf(ctx, id, _a2)
 	} else {
-		r0 = ret.Error(0)
+		r0 = ret.Get(0).(models.Product)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, int, models.Product) error); ok {
+		r1 = rf(ctx, id, _a2)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // NewProducts creates a new instance of Products. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

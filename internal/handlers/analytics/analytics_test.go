@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"go-pet-shop/internal/models"
+	"go-pet-shop/internal/service"
 	"io"
 	"log/slog"
 	"net/http"
@@ -40,7 +41,7 @@ func (m *analyticsMock) GetPopularProducts(ctx context.Context) ([]models.Popula
 func TestGetUserOrderHistoryFromQuery(t *testing.T) {
 	mock := &analyticsMock{
 		getHistoryFunc: func(_ context.Context, email string) ([]models.OrderDetail, error) {
-			if email != "alex@example.com" {
+			if email != "Alex@Example.com" {
 				t.Fatalf("unexpected email: %s", email)
 			}
 			return []models.OrderDetail{{
@@ -86,10 +87,15 @@ func TestGetUserOrderHistoryFromPath(t *testing.T) {
 }
 
 func TestGetUserOrderHistoryRejectsInvalidEmail(t *testing.T) {
+	mock := &analyticsMock{
+		getHistoryFunc: func(context.Context, string) ([]models.OrderDetail, error) {
+			return nil, service.InvalidInput("valid user email is required")
+		},
+	}
 	req := httptest.NewRequest(http.MethodGet, "/users/history?email=invalid", nil)
 	w := httptest.NewRecorder()
 
-	New(analyticsTestLogger(), &analyticsMock{}).GetUserOrderHistory(w, req)
+	New(analyticsTestLogger(), mock).GetUserOrderHistory(w, req)
 
 	assertAnalyticsStatus(t, w, http.StatusBadRequest)
 }

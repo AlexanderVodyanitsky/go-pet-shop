@@ -5,29 +5,27 @@ import (
 	"errors"
 	"go-pet-shop/internal/handlers/httpx"
 	"go-pet-shop/internal/models"
-	"go-pet-shop/internal/storage"
+	"go-pet-shop/internal/service"
 	"log/slog"
 	"net/http"
-	"net/mail"
-	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 )
 
 type Users interface {
-	CreateUser(ctx context.Context, user models.User) (int, error)
+	CreateUser(ctx context.Context, user models.User) (models.User, error)
 	GetUserByEmail(ctx context.Context, email string) (models.User, error)
 	GetAllUsers(ctx context.Context) ([]models.User, error)
 }
 
 type Handler struct {
 	log     *slog.Logger
-	storage Users
+	service Users
 }
 
-func New(log *slog.Logger, storage Users) *Handler {
-	return &Handler{log: log, storage: storage}
+func New(log *slog.Logger, service Users) *Handler {
+	return &Handler{log: log, service: service}
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -38,13 +36,12 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
-	if err := validateUser(&user); err != nil {
+	createdUser, err := h.service.CreateUser(r.Context(), user)
+	if errors.Is(err, service.ErrInvalidInput) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	id, err := h.storage.CreateUser(r.Context(), user)
-	if errors.Is(err, storage.ErrConflict) {
+	if errors.Is(err, service.ErrConflict) {
 		httpx.Error(w, http.StatusConflict, "a user with this email already exists")
 		return
 	}
@@ -54,14 +51,13 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user.ID = id
-	httpx.JSON(w, http.StatusCreated, user)
+	httpx.JSON(w, http.StatusCreated, createdUser)
 }
 
 func (h *Handler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
 	log := h.requestLogger(r, "handlers.user.GetAllUsers")
 
-	users, err := h.storage.GetAllUsers(r.Context())
+	users, err := h.service.GetAllUsers(r.Context())
 	if err != nil {
 		log.Error("failed to get users", slog.Any("error", err))
 		httpx.Error(w, http.StatusInternalServerError, "failed to retrieve users")
@@ -74,14 +70,13 @@ func (h *Handler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetUserByEmail(w http.ResponseWriter, r *http.Request) {
 	log := h.requestLogger(r, "handlers.user.GetUserByEmail")
 
-	email := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "email")))
-	if !validEmail(email) {
-		httpx.Error(w, http.StatusBadRequest, "valid user email is required")
+	email := chi.URLParam(r, "email")
+	value, err := h.service.GetUserByEmail(r.Context(), email)
+	if errors.Is(err, service.ErrInvalidInput) {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	value, err := h.storage.GetUserByEmail(r.Context(), email)
-	if errors.Is(err, storage.ErrNotFound) {
+	if errors.Is(err, service.ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "user not found")
 		return
 	}
@@ -99,21 +94,4 @@ func (h *Handler) requestLogger(r *http.Request, fn string) *slog.Logger {
 		slog.String("fn", fn),
 		slog.String("request_id", middleware.GetReqID(r.Context())),
 	)
-}
-
-func validateUser(user *models.User) error {
-	user.Name = strings.TrimSpace(user.Name)
-	user.Email = strings.ToLower(strings.TrimSpace(user.Email))
-	if user.Name == "" {
-		return errors.New("user name is required")
-	}
-	if !validEmail(user.Email) {
-		return errors.New("valid user email is required")
-	}
-	return nil
-}
-
-func validEmail(value string) bool {
-	address, err := mail.ParseAddress(value)
-	return err == nil && address.Address == value
 }
