@@ -5,17 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"go-pet-shop/internal/models"
+	"go-pet-shop/internal/storage"
+
+	"github.com/jackc/pgx/v5"
 )
 
-var (
-	ErrNotFound     = errors.New("not found")
-	ErrInvalidInput = errors.New("invalid input")
-)
-
-// ❗ Памятка - Контекст не должен создаваться через context.Background() внутри методов.
-// Нужно пробросить ctx из main.go (или из вызывающего слоя) до уровня storage.
-// Иначе тайм-ауты и отмены не будут работать — все запросы всегда будут выполняться
-// с “вечным” background-контекстом.
 // GetAllProducts - получает все продукты
 func (s *Storage) GetAllProducts(ctx context.Context) ([]models.Product, error) {
 	const fn = "storage.postgres.product.GetAllProducts"
@@ -26,7 +20,7 @@ func (s *Storage) GetAllProducts(ctx context.Context) ([]models.Product, error) 
 	}
 	defer rows.Close()
 
-	var products []models.Product
+	products := make([]models.Product, 0)
 	for rows.Next() {
 		var p models.Product
 		if err := rows.Scan(&p.ID, &p.Name, &p.Price, &p.Stock); err != nil {
@@ -41,6 +35,25 @@ func (s *Storage) GetAllProducts(ctx context.Context) ([]models.Product, error) 
 	}
 
 	return products, nil
+}
+
+// GetProductByID получает товар по идентификатору.
+func (s *Storage) GetProductByID(ctx context.Context, id int) (models.Product, error) {
+	const fn = "storage.postgres.product.GetProductByID"
+
+	var product models.Product
+	err := s.db.QueryRow(ctx,
+		`SELECT id, name, price, stock FROM products WHERE id = $1`,
+		id,
+	).Scan(&product.ID, &product.Name, &product.Price, &product.Stock)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Product{}, fmt.Errorf("%s: %w: id=%d", fn, storage.ErrNotFound, id)
+	}
+	if err != nil {
+		return models.Product{}, fmt.Errorf("%s: %w", fn, err)
+	}
+
+	return product, nil
 }
 
 // CreateProduct - создает продукт и возвращает его ID
@@ -71,7 +84,7 @@ func (s *Storage) DeleteProduct(ctx context.Context, id int) error {
 	}
 
 	if cmd.RowsAffected() == 0 {
-		return fmt.Errorf("%s: %w: id=%d", fn, ErrNotFound, id)
+		return fmt.Errorf("%s: %w: id=%d", fn, storage.ErrNotFound, id)
 	}
 
 	return nil
@@ -89,7 +102,7 @@ func (s *Storage) UpdateProduct(ctx context.Context, p models.Product) error {
 	}
 
 	if cmd.RowsAffected() == 0 {
-		return fmt.Errorf("%s: %w: id=%d", fn, ErrNotFound, p.ID)
+		return fmt.Errorf("%s: %w: id=%d", fn, storage.ErrNotFound, p.ID)
 	}
 
 	return nil

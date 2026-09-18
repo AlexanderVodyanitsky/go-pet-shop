@@ -3,58 +3,101 @@ package product
 import (
 	"context"
 	"errors"
+	productmocks "go-pet-shop/internal/handlers/product/mocks"
 	"go-pet-shop/internal/models"
+	"go-pet-shop/internal/service"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/go-chi/chi"
+	"github.com/stretchr/testify/mock"
 )
 
-// Get Product - Ready
-func TestGetAllProducts_Success(t *testing.T) {
-	// Мокаем storage — он вернёт один продукт.
-	mock := &ProductsMock{
-		GetAllProductsFunc: func(ctx context.Context) ([]models.Product, error) {
-			return []models.Product{
-				{ID: 1, Name: "Dog Food"},
-			}, nil
-		},
-	}
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
-	// Создаем HTTP-запрос GET /products
-	req := httptest.NewRequest(http.MethodGet, "/products", nil)
-	w := httptest.NewRecorder()
+func requestWithID(method, target, id, body string) (*http.Request, *httptest.ResponseRecorder) {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 
-	// Создаем хендлер с мок-хранилищем
-	handler := New(slog.Default(), mock)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", id)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 
-	// Вызываем метод GetAllProducts, который является http.HandlerFunc
-	handler.GetAllProducts(w, req)
+	return req, httptest.NewRecorder()
+}
 
-	// Проверяем HTTP-код
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w.Code)
+func request(method, target, body string) (*http.Request, *httptest.ResponseRecorder) {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	return req, httptest.NewRecorder()
+}
+
+func assertStatus(t *testing.T, recorder *httptest.ResponseRecorder, want int) {
+	t.Helper()
+
+	if recorder.Code != want {
+		t.Fatalf("expected status %d, got %d", want, recorder.Code)
 	}
 }
-func TestGetAllProducts_Error(t *testing.T) {
-	// Мокаем storage — он будет возвращать ошибку
-	mock := &ProductsMock{
-		GetAllProductsFunc: func(ctx context.Context) ([]models.Product, error) {
-			return nil, errors.New("DB error")
-		},
-	}
 
-	// Создаем запрос
-	req := httptest.NewRequest(http.MethodGet, "/products", nil)
-	w := httptest.NewRecorder()
+// =======================
+// Get All Products
+// =======================
 
-	handler := New(slog.Default(), mock)
+func TestGetAllProducts_Success(t *testing.T) {
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("GetAllProducts", mock.Anything).Return([]models.Product{
+		{ID: 1, Name: "Dog Food", Price: 10.5, Stock: 3},
+	}, nil).Once()
+
+	req, w := request(http.MethodGet, "/products", "")
+	handler := New(testLogger(), storageMock)
+
 	handler.GetAllProducts(w, req)
 
-	// Ожидаем HTTP 500
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", w.Code)
-	}
+	assertStatus(t, w, http.StatusOK)
+}
+
+func TestGetAllProducts_Fail(t *testing.T) {
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("GetAllProducts", mock.Anything).Return(nil, errors.New("db error")).Once()
+
+	req, w := request(http.MethodGet, "/products", "")
+	handler := New(testLogger(), storageMock)
+
+	handler.GetAllProducts(w, req)
+
+	assertStatus(t, w, http.StatusInternalServerError)
+}
+
+func TestGetProductByID_Success(t *testing.T) {
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("GetProductByID", mock.Anything, 1).Return(models.Product{
+		ID: 1, Name: "Dog Food", Price: 10.5, Stock: 3,
+	}, nil).Once()
+
+	req, w := requestWithID(http.MethodGet, "/products/1", "1", "")
+	New(testLogger(), storageMock).GetProductByID(w, req)
+
+	assertStatus(t, w, http.StatusOK)
+}
+
+func TestGetProductByID_NotFound(t *testing.T) {
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("GetProductByID", mock.Anything, 42).
+		Return(models.Product{}, service.ErrNotFound).Once()
+
+	req, w := requestWithID(http.MethodGet, "/products/42", "42", "")
+	New(testLogger(), storageMock).GetProductByID(w, req)
+
+	assertStatus(t, w, http.StatusNotFound)
 }
 
 // =======================
@@ -62,15 +105,46 @@ func TestGetAllProducts_Error(t *testing.T) {
 // =======================
 
 func TestCreateProduct_Success(t *testing.T) {
-	// TODO: Написать Unit-тест для создания продукта (200 OK)
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("CreateProduct", mock.Anything, models.Product{
+		Name:  "Dog Food",
+		Price: 10.5,
+		Stock: 3,
+	}).Return(models.Product{ID: 1, Name: "Dog Food", Price: 10.5, Stock: 3}, nil).Once()
+
+	req, w := request(http.MethodPost, "/products", `{"Name":"Dog Food","Price":10.5,"Stock":3}`)
+	handler := New(testLogger(), storageMock)
+
+	handler.CreateProduct(w, req)
+
+	assertStatus(t, w, http.StatusCreated)
 }
 
 func TestCreateProduct_BadRequest(t *testing.T) {
-	// TODO: Написать Unit-тест для создания продукта с невалидным JSON (400 Bad Request)
+	storageMock := productmocks.NewProducts(t)
+
+	req, w := request(http.MethodPost, "/products", `{"Name":`)
+	handler := New(testLogger(), storageMock)
+
+	handler.CreateProduct(w, req)
+
+	assertStatus(t, w, http.StatusBadRequest)
 }
 
 func TestCreateProduct_Fail(t *testing.T) {
-	// TODO: Написать Unit-тест для создания продукта при ошибке сервиса (500 Internal Server Error)
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("CreateProduct", mock.Anything, models.Product{
+		Name:  "Dog Food",
+		Price: 10.5,
+		Stock: 3,
+	}).Return(models.Product{}, errors.New("db error")).Once()
+
+	req, w := request(http.MethodPost, "/products", `{"Name":"Dog Food","Price":10.5,"Stock":3}`)
+	handler := New(testLogger(), storageMock)
+
+	handler.CreateProduct(w, req)
+
+	assertStatus(t, w, http.StatusInternalServerError)
 }
 
 // =======================
@@ -78,15 +152,46 @@ func TestCreateProduct_Fail(t *testing.T) {
 // =======================
 
 func TestUpdateProduct_Success(t *testing.T) {
-	// TODO: Написать Unit-тест для обновления продукта (200 OK)
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("UpdateProduct", mock.Anything, 1, models.Product{
+		Name:  "Cat Toy",
+		Price: 7.25,
+		Stock: 8,
+	}).Return(models.Product{ID: 1, Name: "Cat Toy", Price: 7.25, Stock: 8}, nil).Once()
+
+	req, w := requestWithID(http.MethodPut, "/products/1", "1", `{"Name":"Cat Toy","Price":7.25,"Stock":8}`)
+	handler := New(testLogger(), storageMock)
+
+	handler.UpdateProduct(w, req)
+
+	assertStatus(t, w, http.StatusOK)
 }
 
 func TestUpdateProduct_BadRequest(t *testing.T) {
-	// TODO: Написать Unit-тест для обновления продукта с невалидным JSON (400 Bad Request)
+	storageMock := productmocks.NewProducts(t)
+
+	req, w := requestWithID(http.MethodPut, "/products/1", "1", `{"Name":`)
+	handler := New(testLogger(), storageMock)
+
+	handler.UpdateProduct(w, req)
+
+	assertStatus(t, w, http.StatusBadRequest)
 }
 
 func TestUpdateProduct_Fail(t *testing.T) {
-	// TODO: Написать Unit-тест для обновления продукта при ошибке сервиса (500 Internal Server Error)
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("UpdateProduct", mock.Anything, 1, models.Product{
+		Name:  "Cat Toy",
+		Price: 7.25,
+		Stock: 8,
+	}).Return(models.Product{}, errors.New("db error")).Once()
+
+	req, w := requestWithID(http.MethodPut, "/products/1", "1", `{"Name":"Cat Toy","Price":7.25,"Stock":8}`)
+	handler := New(testLogger(), storageMock)
+
+	handler.UpdateProduct(w, req)
+
+	assertStatus(t, w, http.StatusInternalServerError)
 }
 
 // =======================
@@ -94,13 +199,36 @@ func TestUpdateProduct_Fail(t *testing.T) {
 // =======================
 
 func TestDeleteProduct_Success(t *testing.T) {
-	// TODO: Написать Unit-тест для удаления продукта (200 OK)
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("DeleteProduct", mock.Anything, 1).Return(nil).Once()
+
+	req, w := requestWithID(http.MethodDelete, "/products/1", "1", "")
+	handler := New(testLogger(), storageMock)
+
+	handler.DeleteProduct(w, req)
+
+	assertStatus(t, w, http.StatusNoContent)
 }
 
 func TestDeleteProduct_BadRequest(t *testing.T) {
-	// TODO: Написать Unit-тест для удаления продукта с пустым id (400 Bad Request)
+	storageMock := productmocks.NewProducts(t)
+
+	req, w := request(http.MethodDelete, "/products/", "")
+	handler := New(testLogger(), storageMock)
+
+	handler.DeleteProduct(w, req)
+
+	assertStatus(t, w, http.StatusBadRequest)
 }
 
 func TestDeleteProduct_Fail(t *testing.T) {
-	// TODO: Написать Unit-тест для удаления продукта при ошибке сервиса (500 Internal Server Error)
+	storageMock := productmocks.NewProducts(t)
+	storageMock.On("DeleteProduct", mock.Anything, 1).Return(errors.New("db error")).Once()
+
+	req, w := requestWithID(http.MethodDelete, "/products/1", "1", "")
+	handler := New(testLogger(), storageMock)
+
+	handler.DeleteProduct(w, req)
+
+	assertStatus(t, w, http.StatusInternalServerError)
 }

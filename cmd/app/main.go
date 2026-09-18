@@ -4,8 +4,17 @@ import (
 	"context"
 	"go-pet-shop/internal/config"
 	"go-pet-shop/internal/handlers"
+	"go-pet-shop/internal/handlers/analytics"
+	"go-pet-shop/internal/handlers/checkout"
+	"go-pet-shop/internal/handlers/order"
 	"go-pet-shop/internal/handlers/product"
+	"go-pet-shop/internal/handlers/user"
 	"go-pet-shop/internal/lib/logger"
+	analyticsservice "go-pet-shop/internal/service/analytics"
+	checkoutservice "go-pet-shop/internal/service/checkout"
+	orderservice "go-pet-shop/internal/service/order"
+	productservice "go-pet-shop/internal/service/product"
+	userservice "go-pet-shop/internal/service/user"
 	"go-pet-shop/internal/storage/postgres"
 	"log/slog"
 	"net/http"
@@ -50,13 +59,38 @@ func main() {
 	router.Use(middleware.URLFormat)
 	router.Use(logger.CustomLogger(log))
 
-	// Handlers
-	productHandler := product.New(log, storage)
-	router.Get("/health", handlers.StatusHandler)
+	// Services: business rules and use cases.
+	productService := productservice.New(storage)
+	userService := userservice.New(storage)
+	orderService := orderservice.New(storage)
+	checkoutService := checkoutservice.New(storage)
+	analyticsService := analyticsservice.New(storage)
+
+	// Handlers: HTTP transport only.
+	productHandler := product.New(log, productService)
+	userHandler := user.New(log, userService)
+	orderHandler := order.New(log, orderService)
+	checkoutHandler := checkout.New(log, checkoutService)
+	analyticsHandler := analytics.New(log, analyticsService)
+
+	router.Get("/status", handlers.StatusHandler)
 	router.Get("/products", productHandler.GetAllProducts)
 	router.Post("/products", productHandler.CreateProduct)
-	router.Delete("/products/{id}", productHandler.DeleteProduct)
+	router.Get("/products/popular", analyticsHandler.GetPopularProducts)
+	router.Get("/products/{id}", productHandler.GetProductByID)
 	router.Put("/products/{id}", productHandler.UpdateProduct)
+	router.Delete("/products/{id}", productHandler.DeleteProduct)
+	router.Post("/orders", orderHandler.CreateOrder)
+	router.Post("/orders/{id}/items", orderHandler.AddOrderItem)
+	router.Get("/orders/{id}", orderHandler.GetOrderByID)
+	router.Post("/checkout", checkoutHandler.PlaceOrder)
+	router.Get("/users", userHandler.GetAllUsers)
+	router.Post("/users", userHandler.CreateUser)
+	router.Get("/users/history", analyticsHandler.GetUserOrderHistory)
+	router.Get("/users/orders", orderHandler.GetOrdersByUserEmail)
+	router.Get("/users/{email}/history", analyticsHandler.GetUserOrderHistory)
+	router.Get("/users/{email}/orders", orderHandler.GetOrdersByUserEmail)
+	router.Get("/users/{email}", userHandler.GetUserByEmail)
 
 	// Settings and started server
 	srv := &http.Server{
